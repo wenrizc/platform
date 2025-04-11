@@ -109,12 +109,13 @@ public class UserService {
         if (user != null) {
             user.updateLastActiveTime();
             user.setActive(true);  // 确保用户状态为活跃
-            userRepository.save(user);
-            logger.debug("更新用户活动时间: {}", user.getUsername());
-            return user;
+            return userRepository.save(user);
+        } else {
+            logger.warn("尝试更新不存在的用户会话: {}", sessionId);
+            return null;
         }
-        return null;
     }
+
 
     /**
      * 用户退出
@@ -180,5 +181,19 @@ public class UserService {
 
         logger.info("清理不活跃用户完成，截止时间: {}，清理前活跃用户: {}，删除用户数: {}",
                 cutoffTime, activeUsers, deletedCount);
+    }
+
+    /**
+     * 更新用户的会话ID
+     */
+    public boolean updateUserSessionId(Long userId, String newSessionId) {
+        User user = userRepository.findById(userId).orElse(null);
+        if (user != null) {
+            user.setSessionId(newSessionId);
+            user.setLastActiveTime(System.currentTimeMillis());
+            userRepository.save(user);
+            return true;
+        }
+        return false;
     }
 }

@@ -104,4 +104,7 @@ public class User {
     public void setActive(boolean active) {
         this.active = active;
     }
+
+    public void setLastActiveTime(long l) {this.lastActiveTime = Instant.ofEpochMilli(l);
+    }
 }

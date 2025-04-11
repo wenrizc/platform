@@ -17,6 +17,7 @@ import org.springframework.web.socket.messaging.SessionDisconnectEvent;
 import org.springframework.web.socket.messaging.SessionSubscribeEvent;
 
 import java.security.Principal;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -39,20 +40,52 @@ public class UserWebSocketHandler {
      */
     @MessageMapping("/user.connect")
     public void handleUserConnect(@Payload Map<String, Object> payload,
-                                  SimpMessageHeaderAccessor headerAccessor) {
+            SimpMessageHeaderAccessor headerAccessor) {
         String username = (String) payload.get("username");
         String sessionId = headerAccessor.getSessionId();
 
+        // 从握手阶段获取HTTP会话ID
+        String httpSessionId = (String) headerAccessor.getSessionAttributes().get("sessionId");
+
         if (username != null && !username.trim().isEmpty()) {
-            // 检查用户是否已通过REST API登录
-            User user = userService.findBySessionId(sessionId);
+            // 使用HTTP会话ID查找用户
+            User user = null;
+            if (httpSessionId != null) {
+                user = userService.findBySessionId(httpSessionId);
+            }
+
+            // 如果找不到，尝试使用WebSocket会话ID
+            if (user == null) {
+                user = userService.findByUsername(username);
+            }
+
+            // 如果用户存在且已经有活跃会话，拒绝新连接
+            if (user != null && user.isActive() && !Objects.equals(user.getSessionId(), sessionId)
+                    && !Objects.equals(user.getSessionId(), httpSessionId)) {
+                // 向客户端发送拒绝消息
+                Map<String, Object> response = new HashMap<>();
+                response.put("type", "CONNECTION_REJECTED");
+                response.put("reason", "USER_ALREADY_CONNECTED");
+                response.put("message", "该账户已在其他设备登录");
+
+                // 使用临时会话发送消息
+                headerAccessor.getSessionAttributes().put("username", username);
+                webSocketService.sendMessageToUser(username, "/queue/errors", response);
+                logger.warn("用户 {} 尝试重复登录，已拒绝新连接", username);
+                return;
+            }
+
+            // 用户验证逻辑
             if (user == null || !username.equals(user.getUsername())) {
                 logger.warn("未授权的WebSocket连接尝试: {}", username);
-                return; // 拒绝未登录用户的连接
+                return;
             }
 
             // 存储用户名到会话属性中
             headerAccessor.getSessionAttributes().put("username", username);
+
+            // 更新用户会话ID为WebSocket会话ID
+            userService.updateUserSessionId(user.getId(), sessionId);
 
             // 更新用户活动时间
             userService.updateUserActivity(sessionId);
@@ -65,7 +98,29 @@ public class UserWebSocketHandler {
                 }
             });
 
-            logger.info("用户WebSocket连接: {}, 会话ID: {}", username, sessionId);
+            logger.info("用户WebSocket连接成功: {}, 会话ID: {}", username, sessionId);
+        }
+    }
+
+    /**
+     * 处理用户主动退出登录
+     */
+    @MessageMapping("/user.logout")
+    public void handleUserLogout(SimpMessageHeaderAccessor headerAccessor) {
+        String sessionId = headerAccessor.getSessionId();
+        String username = (String) headerAccessor.getSessionAttributes().get("username");
+
+        if (username != null && sessionId != null) {
+            User user = userService.findBySessionId(sessionId);
+            if (user != null) {
+                // 设置用户为离线状态
+                boolean success = userService.logoutUser(sessionId);
+                if (success) {
+                    // 广播用户离线消息
+                    webSocketService.sendUserStatusUpdate(user, false);
+                    logger.info("用户主动退出登录: {}, 会话ID: {}", username, sessionId);
+                }
+            }
         }
     }
 
@@ -74,7 +129,7 @@ public class UserWebSocketHandler {
      */
     @MessageMapping("/user.heartbeat")
     public void handleUserHeartbeat(@Payload Map<String, Object> payload,
-                                    SimpMessageHeaderAccessor headerAccessor) {
+            SimpMessageHeaderAccessor headerAccessor) {
         String sessionId = headerAccessor.getSessionId();
         if (sessionId != null) {
             userService.updateUserActivity(sessionId);
@@ -141,7 +196,7 @@ public class UserWebSocketHandler {
      */
     @MessageMapping("/lobby.message")
     public void handleLobbyMessage(@Payload Map<String, Object> payload,
-                                   SimpMessageHeaderAccessor headerAccessor) {
+            SimpMessageHeaderAccessor headerAccessor) {
         String username = (String) headerAccessor.getSessionAttributes().get("username");
         if (username == null) {
             logger.warn("未授权的用户尝试发送大厅消息");
