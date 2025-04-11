@@ -1,6 +1,7 @@
 package com.platform.websocket;
 
 import com.platform.entity.User;
+import com.platform.service.RoomService;
 import com.platform.service.UserService;
 import com.platform.service.WebSocketService;
 import org.slf4j.Logger;
@@ -28,11 +29,13 @@ public class UserWebSocketHandler {
 
     private final UserService userService;
     private final WebSocketService webSocketService;
+    private final RoomService roomService;
 
     @Autowired
-    public UserWebSocketHandler(UserService userService, WebSocketService webSocketService) {
+    public UserWebSocketHandler(UserService userService, WebSocketService webSocketService, RoomService roomService) {
         this.userService = userService;
         this.webSocketService = webSocketService;
+        this.roomService = roomService;
     }
 
     /**
@@ -178,6 +181,13 @@ public class UserWebSocketHandler {
         if (sessionId != null) {
             User user = userService.findBySessionId(sessionId);
             if (user != null) {
+                // 先处理用户离开房间逻辑
+                long roomId = user.getRoomId();
+                if (roomId != 0) {
+                    // 调用离开房间的方法
+                    roomService.leaveRoom(user.getId(), roomId);
+                }
+
                 // 设置用户为离线状态
                 boolean success = userService.logoutUser(sessionId);
                 if (success) {

@@ -32,6 +32,9 @@ public class User {
     @Column(name = "is_active")
     private boolean active = true;
 
+    @Column(name = "room_id")
+    private long roomId;
+
     public User() {
     }
 
@@ -106,5 +109,13 @@ public class User {
     }
 
     public void setLastActiveTime(long l) {this.lastActiveTime = Instant.ofEpochMilli(l);
+    }
+
+    public long getRoomId() {
+        return roomId;
+    }
+
+    public void setRoomId(long roomId) {
+        this.roomId = roomId;
     }
 }

@@ -17,7 +17,7 @@ public class Room {
     private String name;
 
     @Column(nullable = false)
-    private String gameType;
+    private String gameName;
 
     @Column(name = "max_players")
     private int maxPlayers;
@@ -59,9 +59,9 @@ public class Room {
     }
 
     // 带参数的构造函数
-    public Room(String name, String gameType, int maxPlayers, String creatorUsername) {
+    public Room(String name, String gameName, int maxPlayers, String creatorUsername) {
         this.name = name;
-        this.gameType = gameType;
+        this.gameName = gameName;
         this.maxPlayers = maxPlayers;
         this.creatorUsername = creatorUsername;
         this.players.add(creatorUsername); // 创建者自动加入房间
@@ -82,12 +82,12 @@ public class Room {
         this.name = name;
     }
 
-    public String getGameType() {
-        return gameType;
+    public String getGameName() {
+        return gameName;
     }
 
-    public void setGameType(String gameType) {
-        this.gameType = gameType;
+    public void setGameName(String gameName) {
+        this.gameName = gameName;
     }
 
     public int getMaxPlayers() {

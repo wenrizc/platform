@@ -3,6 +3,7 @@ package com.platform.websocket;
 import com.platform.entity.Room;
 import com.platform.service.RoomService;
 import com.platform.service.UserService;
+import com.platform.service.WebSocketService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +12,7 @@ import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
 import org.springframework.stereotype.Controller;
 
+import java.util.HashMap;
 import java.util.Map;
 
 @Controller
@@ -20,11 +22,13 @@ public class RoomWebSocketHandler {
 
     private final RoomService roomService;
     private final UserService userService;
+    private final WebSocketService webSocketService;
 
     @Autowired
-    public RoomWebSocketHandler(RoomService roomService, UserService userService) {
+    public RoomWebSocketHandler(RoomService roomService, UserService userService, WebSocketService webSocketService) {
         this.roomService = roomService;
         this.userService = userService;
+        this.webSocketService = webSocketService;
     }
 
     /**
@@ -40,15 +44,32 @@ public class RoomWebSocketHandler {
         }
 
         String roomName = (String) payload.get("roomName");
-        String gameType = (String) payload.get("gameType");
+        String gameName = (String) payload.get("gameName");
         Integer maxPlayers = (Integer) payload.get("maxPlayers");
 
-        if (roomName != null && gameType != null && maxPlayers != null) {
-            roomService.createRoom(username, roomName, gameType, maxPlayers);
+        if (roomName != null && gameName != null && maxPlayers != null) {
+            // 检查房间名是否已存在
+            if (roomService.isRoomNameExists(roomName)) {
+                // 发送错误消息给客户端
+                Map<String, Object> errorMessage = new HashMap<>();
+                errorMessage.put("error", "房间名已存在，请使用其他名称");
+                webSocketService.sendMessageToUser(username, "/queue/errors", errorMessage);
+                return;
+            }
+            Room room = roomService.createRoom(username, roomName, gameName, maxPlayers);
+
+            // 添加：发送创建成功消息
+            if (room != null) {
+                Map<String, Object> successMessage = new HashMap<>();
+                successMessage.put("type", "ROOM_CREATED");
+                successMessage.put("room", room);
+                webSocketService.sendMessageToUser(username, "/queue/messages", successMessage);
+            }
         } else {
             logger.warn("房间创建请求缺少必要参数");
         }
     }
+
 
     /**
      * 用户请求加入房间
@@ -81,7 +102,7 @@ public class RoomWebSocketHandler {
     }
 
     /**
-     * 房主请求开始游戏
+     * 请求开始游戏
      */
     @MessageMapping("/room.start")
     public void handleGameStart(@Payload Map<String, Object> payload,
@@ -97,7 +118,7 @@ public class RoomWebSocketHandler {
     }
 
     /**
-     * 房主请求结束游戏
+     * 请求结束游戏
      */
     @MessageMapping("/room.end")
     public void handleGameEnd(@Payload Map<String, Object> payload,

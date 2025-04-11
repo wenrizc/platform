@@ -6,9 +6,12 @@ import com.platform.repository.RoomRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class RoomService {
@@ -21,7 +24,8 @@ public class RoomService {
     private final MessageService messageService;
 
     @Autowired
-    public RoomService(RoomRepository roomRepository, UserService userService, WebSocketService webSocketService, MessageService messageService) {
+    public RoomService(RoomRepository roomRepository, UserService userService, WebSocketService webSocketService,
+            MessageService messageService) {
         this.roomRepository = roomRepository;
         this.userService = userService;
         this.webSocketService = webSocketService;
@@ -31,11 +35,16 @@ public class RoomService {
     /**
      * 创建新房间
      */
-    public Room createRoom(String username, String roomName, String gameType, int maxPlayers) {
+    public Room createRoom(String username, String roomName, String gameName, int maxPlayers) {
         // 检查用户是否存在且活跃
         User user = userService.findByUsername(username);
         if (user == null || !userService.isUserActive(user)) {
             logger.warn("用户 {} 尝试创建房间但未登录或不活跃", username);
+            return null;
+        }
+
+        if (user.getRoomId() != 0) {
+            logger.warn("用户 {} 已经在房间中，无法创建新房间", username);
             return null;
         }
 
@@ -46,8 +55,14 @@ public class RoomService {
             return null;
         }
 
+        // 检查房间名是否已存在
+        if (isRoomNameExists(roomName)) {
+            logger.warn("用户 {} 尝试创建的房间名 {} 已存在", username, roomName);
+            return null;
+        }
+
         // 创建新房间
-        Room room = new Room(roomName, gameType, maxPlayers, username);
+        Room room = new Room(roomName, gameName, maxPlayers, username);
 
         // TODO: 调用n2n服务创建虚拟网络
         // String networkId = n2nService.createNetwork();
@@ -251,6 +266,13 @@ public class RoomService {
     }
 
     /**
+     * 检查房间名是否已存在
+     */
+    public boolean isRoomNameExists(String roomName) {
+        return roomRepository.findByName(roomName).isPresent();
+    }
+
+    /**
      * 获取可加入的房间列表
      */
     public List<Room> getJoinableRooms() {
@@ -258,10 +280,10 @@ public class RoomService {
     }
 
     /**
-     * 按游戏类型获取可加入的房间列表
+     * 按游戏名称获取可加入的房间列表
      */
-    public List<Room> getJoinableRoomsByGameType(String gameType) {
-        return roomRepository.findJoinableRoomsByGameType(gameType);
+    public List<Room> getJoinableRoomsByGameName(String gameName) {
+        return roomRepository.findJoinableRoomsByGameName(gameName);
     }
 
     /**
@@ -299,7 +321,7 @@ public class RoomService {
         Map<String, Object> detailMessage = new HashMap<>();
         detailMessage.put("id", room.getId());
         detailMessage.put("name", room.getName());
-        detailMessage.put("gameType", room.getGameType());
+        detailMessage.put("gameName", room.getGameName());
         detailMessage.put("maxPlayers", room.getMaxPlayers());
         detailMessage.put("creatorUsername", room.getCreatorUsername());
         detailMessage.put("status", room.getStatus().name());
@@ -311,8 +333,6 @@ public class RoomService {
             webSocketService.sendMessageToUser(player, "/queue/room.detail", detailMessage);
         }
     }
-
-
 
     /**
      * 发送房间消息
@@ -337,4 +357,154 @@ public class RoomService {
             logger.debug("用户 {} 在房间 {} 发送消息: {}", senderUsername, roomId, message);
         }
     }
+
+    @Scheduled(cron = "0 0 * * * *") // 每小时整点执行
+    public void cleanupEmptyRooms() {
+        List<Room> emptyRooms = roomRepository.findEmptyRooms();
+
+        if (!emptyRooms.isEmpty()) {
+            logger.info("开始清理空房间，发现 {} 个空房间", emptyRooms.size());
+
+            for (Room room : emptyRooms) {
+                // 记录要清理的房间信息
+                logger.debug("清理空房间: ID={}, 名称={}, 创建时间={}",
+                        room.getId(), room.getName(), room.getCreationTime());
+
+                // 清理房间相关的消息记录
+                messageService.clearRoomMessageHistory(room.getId());
+
+                // 清理N2N网络配置
+                // Todo: 删除n2n网络
+
+                // 删除房间
+                deleteRoom(room.getId());
+            }
+
+            logger.info("空房间清理完成，共清理 {} 个房间", emptyRooms.size());
+
+            // 发送系统通知
+            webSocketService.sendSystemNotification("系统已自动清理了 " + emptyRooms.size() + " 个空房间");
+        }
+    }
+
+    /**
+     * 用户离开房间
+     *
+     * @param userId 用户ID
+     * @param roomId 房间ID
+     * @return 操作结果
+     */
+    public boolean leaveRoom(Long userId, Long roomId) {
+        // 通过用户ID获取用户
+        User user = userService.findById(userId);
+        if (user == null) {
+            logger.warn("尝试让不存在的用户ID {} 离开房间", userId);
+            return false;
+        }
+
+        // 验证用户是否在指定房间中
+        if (user.getRoomId() != roomId) {
+            logger.warn("用户 {} 不在指定房间 {} 中", user.getUsername(), roomId);
+            return false;
+        }
+
+        // 调用基于用户名的离开房间方法
+        return leaveRoom(user.getUsername());
+    }
+
+    public List<Room> getJoinableRoomsWithCleanup() {
+        int offlineUsersRemoved = 0;
+        int emptyRoomsRemoved = 0;
+        List<Room> allRooms = roomRepository.findAll();
+        List<Room> roomsToDelete = new ArrayList<>();
+
+        for (Room room : allRooms) {
+            boolean roomModified = false;
+            Set<String> offlineUsers = new HashSet<>();
+
+            // 检查每个房间内的所有用户是否在线
+            for (String playerUsername : new HashSet<>(room.getPlayers())) {
+                User user = userService.findByUsername(playerUsername);
+
+                // 如果用户不存在或不在线，将其标记为离线
+                if (user == null || !userService.isUserActive(user)) {
+                    offlineUsers.add(playerUsername);
+                }
+            }
+
+            // 从房间中移除所有离线用户
+            for (String offlineUsername : offlineUsers) {
+                room.removePlayer(offlineUsername);
+                roomModified = true;
+                offlineUsersRemoved++;
+                logger.debug("从房间 {} 中移除离线用户: {}", room.getId(), offlineUsername);
+
+                // 广播用户离开消息
+                broadcastRoomUpdate(room, "LEFT", offlineUsername);
+            }
+
+            // 如果房间为空，标记为待删除
+            if (room.isEmpty()) {
+                roomsToDelete.add(room);
+            }
+            // 否则，如果房间被修改，保存更改
+            else if (roomModified) {
+                roomRepository.save(room);
+            }
+        }
+
+        // 删除所有空房间
+        for (Room room : roomsToDelete) {
+            // 清理房间相关消息记录
+            messageService.clearRoomMessageHistory(room.getId());
+
+            logger.debug("清理空房间: ID={}, 名称={}, 创建时间={}",
+                    room.getId(), room.getName(), room.getCreationTime());
+
+            // 删除房间
+            deleteRoom(room.getId());
+            emptyRoomsRemoved++;
+        }
+
+        // 如果有任何清理操作，发送系统通知
+        if (offlineUsersRemoved > 0 || emptyRoomsRemoved > 0) {
+            String notification = String.format("系统自动清理: 移除了 %d 个离线用户, 删除了 %d 个空房间",
+                    offlineUsersRemoved, emptyRoomsRemoved);
+            webSocketService.sendSystemNotification(notification);
+            logger.info(notification);
+        }
+
+        // 返回可加入的房间
+        return roomRepository.findJoinableRooms();
+    }
+
+    @Transactional
+    public void deleteRoom(Long roomId) {
+        // 使用悲观锁策略获取最新房间状态
+        Room room = roomRepository.findById(roomId).orElse(null);
+
+        if (room != null) {
+            // 再次检查房间是否为空
+            if (room.isEmpty()) {
+                // 删除前先清理相关资源
+                try {
+                    // 清理房间相关消息
+                    messageService.clearRoomMessageHistory(roomId);
+
+                    // 执行删除
+                    roomRepository.deleteById(roomId);
+
+                    logger.info("成功删除空房间: ID={}, 名称={}", roomId, room.getName());
+                } catch (Exception e) {
+                    logger.error("删除房间 {} 时发生错误: {}", roomId, e.getMessage());
+                    throw e;
+                }
+            } else {
+                logger.debug("房间 {} 不为空，跳过删除", roomId);
+            }
+        } else {
+            logger.debug("房间 {} 不存在或已被删除", roomId);
+        }
+    }
+
 }

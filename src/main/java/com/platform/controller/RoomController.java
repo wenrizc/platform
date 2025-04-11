@@ -37,14 +37,19 @@ public class RoomController {
         }
 
         String roomName = (String) request.get("roomName");
-        String gameType = (String) request.get("gameType");
+        String gameName = (String) request.get("gameName");
         Integer maxPlayers = (Integer) request.get("maxPlayers");
 
-        if (roomName == null || gameType == null || maxPlayers == null) {
+        if (roomName == null || gameName == null || maxPlayers == null) {
             return ResponseEntity.badRequest().body(createErrorResponse("缺少必要参数"));
         }
 
-        Room room = roomService.createRoom(username, roomName, gameType, maxPlayers);
+        // 检查房间名是否已存在
+        if (roomService.isRoomNameExists(roomName)) {
+            return ResponseEntity.badRequest().body(createErrorResponse("房间名已存在，请使用其他名称"));
+        }
+
+        Room room = roomService.createRoom(username, roomName, gameName, maxPlayers);
         if (room == null) {
             return ResponseEntity.badRequest().body(createErrorResponse("创建房间失败"));
         }
@@ -137,7 +142,7 @@ public class RoomController {
      */
     @GetMapping
     public ResponseEntity<List<Room>> getJoinableRooms() {
-        return ResponseEntity.ok(roomService.getJoinableRooms());
+        return ResponseEntity.ok(roomService.getJoinableRoomsWithCleanup());
     }
 
     /**
@@ -145,7 +150,7 @@ public class RoomController {
      */
     @GetMapping("/by-game/{gameType}")
     public ResponseEntity<List<Room>> getJoinableRoomsByGameType(@PathVariable String gameType) {
-        return ResponseEntity.ok(roomService.getJoinableRoomsByGameType(gameType));
+        return ResponseEntity.ok(roomService.getJoinableRoomsByGameName(gameType));
     }
 
     /**
