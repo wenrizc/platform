@@ -220,7 +220,7 @@ public class UserWebSocketHandler {
         }
 
         // 发送大厅消息
+        logger.info("用户 {} 发送大厅消息: {}", username, message);
         webSocketService.sendLobbyMessage(username, message);
-        logger.debug("用户 {} 发送大厅消息: {}", username, message);
     }
 }

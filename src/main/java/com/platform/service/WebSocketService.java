@@ -1,14 +1,15 @@
 package com.platform.service;
 
-import com.platform.entity.User;
+import java.util.HashMap;
+import java.util.Map;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
+import com.platform.entity.User;
 
 @Service
 public class WebSocketService {
@@ -35,8 +36,12 @@ public class WebSocketService {
      * 广播消息给所有用户
      */
     public void broadcastMessage(String destination, Object payload) {
-        messagingTemplate.convertAndSend(destination, payload);
-        logger.debug("广播消息: {}", payload);
+        try {
+            messagingTemplate.convertAndSend(destination, payload);
+            logger.debug("消息已广播到 {}: {}", destination, payload);
+        } catch (Exception e) {
+            logger.error("广播消息到 {} 失败: {}", destination, e.getMessage(), e);
+        }
     }
 
     /**
@@ -66,17 +71,23 @@ public class WebSocketService {
      * 发送大厅聊天消息
      */
     public void sendLobbyMessage(String senderUsername, String message) {
-        Map<String, Object> chatMessage = new HashMap<>();
-        chatMessage.put("sender", senderUsername);
-        chatMessage.put("message", message);
-        chatMessage.put("timestamp", System.currentTimeMillis());
-        chatMessage.put("type", "LOBBY_MESSAGE");
+        try {
+            // 构建消息
+            Map<String, Object> chatMessage = new HashMap<>();
+            chatMessage.put("sender", senderUsername);
+            chatMessage.put("message", message);
+            chatMessage.put("timestamp", System.currentTimeMillis());
+            chatMessage.put("type", "LOBBY_MESSAGE");
 
-        // 保存消息历史
-        messageService.addLobbyMessage(senderUsername, message);
+            // 保存消息历史
+            messageService.addLobbyMessage(senderUsername, message);
 
-        broadcastMessage("/topic/lobby.messages", chatMessage);
-        logger.debug("发送大厅消息: {} - {}", senderUsername, message);
+            // 广播消息
+            broadcastMessage("/topic/lobby.messages", chatMessage);
+            logger.info("大厅消息已广播: {} - {}", senderUsername, message);
+        } catch (Exception e) {
+            logger.error("发送大厅消息失败: {}", e.getMessage(), e);
+        }
     }
 
     /**
