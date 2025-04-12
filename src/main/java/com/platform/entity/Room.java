@@ -32,14 +32,17 @@ public class Room {
     @Enumerated(EnumType.STRING)
     private RoomStatus status;
 
-    @Column(name = "n2n_network_id")
-    private String n2nNetworkId;
+    @Column(name = "network_id")
+    private String networkId;
 
-    @Column(name = "n2n_network_name")
-    private String n2nNetworkName;
+    @Column(name = "network_name")
+    private String networkName;
 
-    @Column(name = "n2n_network_secret")
-    private String n2nNetworkSecret;
+    @Column(name = "network_secret")
+    private String networkSecret;
+
+    @Column(name = "network_type")
+    private String networkType;
 
     @ElementCollection
     @CollectionTable(name = "room_players", joinColumns = @JoinColumn(name = "room_id"))
@@ -118,28 +121,36 @@ public class Room {
         this.status = status;
     }
 
-    public String getN2nNetworkId() {
-        return n2nNetworkId;
+    public String getNetworkId() {
+        return networkId;
     }
 
-    public void setN2nNetworkId(String n2nNetworkId) {
-        this.n2nNetworkId = n2nNetworkId;
+    public void setNetworkId(String networkId) {
+        this.networkId = networkId;
     }
 
-    public String getN2nNetworkName() {
-        return n2nNetworkName;
+    public String getNetworkName() {
+        return networkName;
     }
 
-    public void setN2nNetworkName(String n2nNetworkName) {
-        this.n2nNetworkName = n2nNetworkName;
+    public void setNetworkName(String networkName) {
+        this.networkName = networkName;
     }
 
-    public String getN2nNetworkSecret() {
-        return n2nNetworkSecret;
+    public String getNetworkSecret() {
+        return networkSecret;
     }
 
-    public void setN2nNetworkSecret(String n2nNetworkSecret) {
-        this.n2nNetworkSecret = n2nNetworkSecret;
+    public void setNetworkSecret(String networkSecret) {
+        this.networkSecret = networkSecret;
+    }
+
+    public String getNetworkType() {
+        return networkType;
+    }
+
+    public void setNetworkType(String networkType) {
+        this.networkType = networkType;
     }
 
     public Set<String> getPlayers() {

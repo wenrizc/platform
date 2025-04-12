@@ -6,6 +6,7 @@ import com.platform.repository.RoomRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -22,14 +23,21 @@ public class RoomService {
     private final UserService userService;
     private final WebSocketService webSocketService;
     private final MessageService messageService;
+    private final VirtualNetworkService networkService;
+    private final VirtualNetworkFactory networkFactory;
+
+    @Value("${virtual.network.default:N2N}")
+    private String networkType;
 
     @Autowired
     public RoomService(RoomRepository roomRepository, UserService userService, WebSocketService webSocketService,
-            MessageService messageService) {
+            MessageService messageService, VirtualNetworkFactory networkFactory) {
         this.roomRepository = roomRepository;
         this.userService = userService;
         this.webSocketService = webSocketService;
         this.messageService = messageService;
+        this.networkFactory = networkFactory;
+        this.networkService = this.networkFactory.getService(networkType);
     }
 
     /**
@@ -64,17 +72,16 @@ public class RoomService {
         // 创建新房间
         Room room = new Room(roomName, gameName, maxPlayers, username);
 
-        // TODO: 调用n2n服务创建虚拟网络
-        // String networkId = n2nService.createNetwork();
-        // String networkName = "room_" + room.getId();
-        // String networkSecret = generateRandomSecret();
-        // room.setN2nNetworkId(networkId);
-        // room.setN2nNetworkName(networkName);
-        // room.setN2nNetworkSecret(networkSecret);
+        // 创建虚拟网络
+        String networkId = networkService.createNetwork();
+        String networkName = "room_" + room.getId();
+        String networkSecret = networkService.generateNetworkSecret();
 
-        // 为创建者分配虚拟IP
-        // TODO: 为用户分配虚拟IP
-        // String virtualIp = userService.assignVirtualIp(username);
+        // 设置房间的网络信息
+        room.setNetworkId(networkId);
+        room.setNetworkName(networkName);
+        room.setNetworkSecret(networkSecret);
+        room.setNetworkType(networkService.getTechnologyName());
 
         Room savedRoom = roomRepository.save(room);
 
@@ -326,8 +333,10 @@ public class RoomService {
         detailMessage.put("creatorUsername", room.getCreatorUsername());
         detailMessage.put("status", room.getStatus().name());
         detailMessage.put("players", room.getPlayers());
-        detailMessage.put("n2nNetworkName", room.getN2nNetworkName());
-        detailMessage.put("n2nNetworkSecret", room.getN2nNetworkSecret());
+        detailMessage.put("networkId", room.getNetworkId());
+        detailMessage.put("networkName", room.getNetworkName());
+        detailMessage.put("networkType", room.getNetworkType());
+        detailMessage.put("timestamp", System.currentTimeMillis());
 
         for (String player : room.getPlayers()) {
             webSocketService.sendMessageToUser(player, "/queue/room.detail", detailMessage);
