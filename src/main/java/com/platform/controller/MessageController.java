@@ -46,7 +46,7 @@ public class MessageController {
         }
 
         // 发送大厅消息
-        webSocketService.sendLobbyMessage(username, message);
+        messageService.sendLobbyMessage(username, message);
 
         Map<String, String> response = new HashMap<>();
         response.put("success", "消息已发送");
@@ -77,7 +77,7 @@ public class MessageController {
         }
 
         // 发送房间消息
-        roomService.sendRoomMessage(roomId, username, message);
+        messageService.sendRoomMessage(roomId, username, message);
 
         Map<String, String> response = new HashMap<>();
         response.put("success", "消息已发送");

@@ -1,6 +1,7 @@
 package com.platform.websocket;
 
 import com.platform.entity.User;
+import com.platform.service.MessageService;
 import com.platform.service.RoomService;
 import com.platform.service.UserService;
 import com.platform.service.WebSocketService;
@@ -30,12 +31,14 @@ public class UserWebSocketHandler {
     private final UserService userService;
     private final WebSocketService webSocketService;
     private final RoomService roomService;
+    private final MessageService messageService;
 
     @Autowired
-    public UserWebSocketHandler(UserService userService, WebSocketService webSocketService, RoomService roomService) {
+    public UserWebSocketHandler(UserService userService, WebSocketService webSocketService, RoomService roomService, MessageService messageService) {
         this.userService = userService;
         this.webSocketService = webSocketService;
         this.roomService = roomService;
+        this.messageService = messageService;
     }
 
     /**
@@ -181,11 +184,20 @@ public class UserWebSocketHandler {
         if (sessionId != null) {
             User user = userService.findBySessionId(sessionId);
             if (user != null) {
-                // 先处理用户离开房间逻辑
+                // 先获取用户房间ID（在处理离开房间逻辑前）
                 long roomId = user.getRoomId();
+
+                // 处理用户离开房间逻辑
                 if (roomId != 0) {
                     // 调用离开房间的方法
                     roomService.leaveRoom(user.getId(), roomId);
+
+                    // 发送系统消息到房间，通知用户离线
+                    messageService.sendSystemMessage(
+                            MessageService.MessageTarget.ROOM,
+                            roomId,
+                            "用户 " + username + " 已断开连接"
+                    );
                 }
 
                 // 设置用户为离线状态
@@ -193,34 +205,19 @@ public class UserWebSocketHandler {
                 if (success) {
                     // 广播用户离线消息
                     webSocketService.sendUserStatusUpdate(user, false);
+
+                    // 发送系统消息到大厅，通知用户离线
+                    messageService.sendSystemMessage(
+                            MessageService.MessageTarget.LOBBY,
+                            null,
+                            "用户 " + username + " 已离线"
+                    );
+
                     logger.info("用户断开连接: {}, 会话ID: {}", username, sessionId);
                 }
             } else {
                 logger.info("未知会话断开连接: {}", sessionId);
             }
         }
-    }
-
-    /**
-     * 处理大厅消息
-     */
-    @MessageMapping("/lobby.message")
-    public void handleLobbyMessage(@Payload Map<String, Object> payload,
-            SimpMessageHeaderAccessor headerAccessor) {
-        String username = (String) headerAccessor.getSessionAttributes().get("username");
-        if (username == null) {
-            logger.warn("未授权的用户尝试发送大厅消息");
-            return;
-        }
-
-        String message = (String) payload.get("message");
-        if (message == null || message.trim().isEmpty()) {
-            logger.warn("用户 {} 尝试发送空消息", username);
-            return;
-        }
-
-        // 发送大厅消息
-        logger.info("用户 {} 发送大厅消息: {}", username, message);
-        webSocketService.sendLobbyMessage(username, message);
     }
 }

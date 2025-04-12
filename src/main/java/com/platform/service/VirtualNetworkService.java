@@ -39,6 +39,7 @@ public interface VirtualNetworkService {
 
     /**
      * 获取网络配置信息
+     * 如果networkId为null，则返回所有网络的概览信息
      * @param networkId 网络ID
      * @return 包含网络配置的Map
      */

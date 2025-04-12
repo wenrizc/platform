@@ -1,8 +1,11 @@
 package com.platform.controller;
 
+import com.platform.entity.Room;
 import com.platform.entity.User;
+import com.platform.service.RoomService;
 import com.platform.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,10 +20,12 @@ import java.util.Map;
 public class UserController {
 
     private final UserService userService;
+    private final RoomService roomService;
 
     @Autowired
-    public UserController(UserService userService) {
+    public UserController(UserService userService, RoomService roomService) {
         this.userService = userService;
+        this.roomService = roomService;
     }
 
     /**
@@ -129,5 +134,54 @@ public class UserController {
     @GetMapping
     public ResponseEntity<List<User>> getAllActiveUsers() {
         return ResponseEntity.ok(userService.getAllActiveUsers());
+    }
+
+    /**
+     * 获取当前用户的网络信息，包括虚拟IP
+     */
+    @GetMapping("/network-info")
+    public ResponseEntity<?> getUserNetworkInfo(HttpSession session) {
+        // 从会话中获取用户名
+        String username = (String) session.getAttribute("username");
+        if (username == null) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "用户未登录");
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
+        }
+
+        // 获取用户信息
+        User user = userService.findByUsername(username);
+        if (user == null) {
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", false);
+            response.put("message", "用户不存在");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
+        }
+
+        // 构建网络信息响应
+        Map<String, Object> networkInfo = new HashMap<>();
+        networkInfo.put("username", username);
+        networkInfo.put("virtualIp", user.getVirtualIp());
+        networkInfo.put("inRoom", user.getRoomId() > 0);
+        networkInfo.put("roomId", user.getRoomId());
+
+        // 如果用户在房间中，添加房间的网络详情
+        if (user.getRoomId() > 0) {
+            Room room = roomService.getRoomInfo(user.getRoomId());
+            if (room != null) {
+                networkInfo.put("roomName", room.getName());
+                networkInfo.put("networkId", room.getNetworkId());
+                networkInfo.put("networkName", room.getNetworkName());
+                networkInfo.put("networkType", room.getNetworkType());
+                // 不返回敏感信息如networkSecret
+            }
+        }
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("success", true);
+        response.put("data", networkInfo);
+
+        return ResponseEntity.ok(response);
     }
 }

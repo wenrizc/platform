@@ -1,27 +1,24 @@
 package com.platform.service;
 
-import java.util.HashMap;
-import java.util.Map;
-
+import com.platform.entity.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
-import com.platform.entity.User;
+import java.util.HashMap;
+import java.util.Map;
 
 @Service
 public class WebSocketService {
 
     private static final Logger logger = LoggerFactory.getLogger(WebSocketService.class);
     private final SimpMessagingTemplate messagingTemplate;
-    private final MessageService messageService;
 
     @Autowired
-    public WebSocketService(SimpMessagingTemplate messagingTemplate, MessageService messageService) {
+    public WebSocketService(SimpMessagingTemplate messagingTemplate) {
         this.messagingTemplate = messagingTemplate;
-        this.messageService = messageService;
     }
 
     /**
@@ -65,29 +62,6 @@ public class WebSocketService {
         response.put("timestamp", System.currentTimeMillis());
 
         sendMessageToUser(username, "/queue/heartbeat", response);
-    }
-
-    /**
-     * 发送大厅聊天消息
-     */
-    public void sendLobbyMessage(String senderUsername, String message) {
-        try {
-            // 构建消息
-            Map<String, Object> chatMessage = new HashMap<>();
-            chatMessage.put("sender", senderUsername);
-            chatMessage.put("message", message);
-            chatMessage.put("timestamp", System.currentTimeMillis());
-            chatMessage.put("type", "LOBBY_MESSAGE");
-
-            // 保存消息历史
-            messageService.addLobbyMessage(senderUsername, message);
-
-            // 广播消息
-            broadcastMessage("/topic/lobby.messages", chatMessage);
-            logger.info("大厅消息已广播: {} - {}", senderUsername, message);
-        } catch (Exception e) {
-            logger.error("发送大厅消息失败: {}", e.getMessage(), e);
-        }
     }
 
     /**

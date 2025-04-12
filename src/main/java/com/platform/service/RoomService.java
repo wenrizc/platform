@@ -72,23 +72,44 @@ public class RoomService {
         // 创建新房间
         Room room = new Room(roomName, gameName, maxPlayers, username);
 
+        // 先保存房间以获取ID
+        Room savedRoom = roomRepository.save(room);
+
         // 创建虚拟网络
         String networkId = networkService.createNetwork();
-        String networkName = "room_" + room.getId();
+        String networkName = "room_" + savedRoom.getId();  // 使用已保存的房间ID
         String networkSecret = networkService.generateNetworkSecret();
 
         // 设置房间的网络信息
-        room.setNetworkId(networkId);
-        room.setNetworkName(networkName);
-        room.setNetworkSecret(networkSecret);
-        room.setNetworkType(networkService.getTechnologyName());
+        savedRoom.setNetworkId(networkId);
+        savedRoom.setNetworkName(networkName);
+        savedRoom.setNetworkSecret(networkSecret);
+        savedRoom.setNetworkType(networkService.getTechnologyName());
 
-        Room savedRoom = roomRepository.save(room);
+        // 再次保存更新后的房间信息
+        savedRoom = roomRepository.save(savedRoom);
+
+        // 添加创建者到房间玩家列表
+        savedRoom.addPlayer(username);
+
+        // 为创建者分配虚拟IP
+        try {
+            String virtualIp = networkService.assignIpAddress(username, networkId);
+            user.setVirtualIp(virtualIp);
+            user.setRoomId(savedRoom.getId());
+            userService.updateUser(user);
+            logger.info("为房主 {} 分配虚拟IP: {}", username, virtualIp);
+        } catch (Exception e) {
+            logger.error("为房主 {} 分配虚拟IP时出错: {}", username, e.getMessage(), e);
+        }
+
+        // 保存更新后的房间信息
+        savedRoom = roomRepository.save(savedRoom);
 
         // 广播房间创建消息
         broadcastRoomUpdate(savedRoom, "CREATED", username);
 
-        logger.info("用户 {} 创建了房间: {}", username, roomName);
+        logger.info("用户 {} 创建了房间: {}, 虚拟网络ID: {}", username, roomName, networkId);
         return savedRoom;
     }
 
@@ -133,10 +154,22 @@ public class RoomService {
 
         // 将用户添加到房间
         room.addPlayer(username);
-        roomRepository.save(room);
 
-        // TODO: 为用户分配虚拟IP
-        // String virtualIp = userService.assignVirtualIp(username);
+        // 为用户分配虚拟IP
+        try {
+            String virtualIp = networkService.assignIpAddress(username, room.getNetworkId());
+            if (user != null) {
+                user.setVirtualIp(virtualIp);
+                user.setRoomId(roomId);  // 更新用户所在房间ID
+                userService.updateUser(user);
+                logger.info("为用户 {} 分配虚拟IP: {}", username, virtualIp);
+            }
+        } catch (Exception e) {
+            logger.error("为用户 {} 分配虚拟IP时出错: {}", username, e.getMessage(), e);
+        }
+
+        // 保存房间状态
+        roomRepository.save(room);
 
         // 广播用户加入消息
         broadcastRoomUpdate(room, "JOINED", username);
@@ -168,20 +201,55 @@ public class RoomService {
         // 从房间中移除用户
         room.removePlayer(username);
 
+        // 清理用户的虚拟IP
+        try {
+            if (user != null) {
+                // 释放用户的虚拟IP
+                networkService.removeIpAddress(username, room.getNetworkId());
+                user.setVirtualIp(null);
+                user.setRoomId(0L);  // 清空用户所在房间ID
+                userService.updateUser(user);
+                logger.info("已释放用户 {} 的虚拟IP", username);
+            }
+        } catch (Exception e) {
+            logger.error("释放用户 {} 的虚拟IP时出错: {}", username, e.getMessage(), e);
+        }
+
         // 判断房间是否为空，如果为空则删除房间
         if (room.isEmpty()) {
-            roomRepository.delete(room);
-            // 清除消息历史
-            messageService.clearRoomMessageHistory(room.getId());
-            // TODO: 删除n2n网络
-            // n2nService.deleteNetwork(room.getN2nNetworkId());
+            try {
+                boolean deleted = networkService.deleteNetwork(room.getNetworkId());
+                if (deleted) {
+                    logger.info("已删除房间 {} 的虚拟网络: {}", room.getId(), room.getNetworkId());
+                } else {
+                    logger.warn("删除房间 {} 的虚拟网络 {} 失败", room.getId(), room.getNetworkId());
+                }
+            } catch (Exception e) {
+                logger.error("删除房间 {} 的虚拟网络时出错: {}", room.getId(), e.getMessage(), e);
+            }
+
             logger.info("房间 {} 已清空并删除", room.getId());
         } else {
             // 如果离开的是创建者，转移房主权限
             if (username.equals(room.getCreatorUsername())) {
                 String newCreator = room.getPlayers().iterator().next();
                 room.setCreatorUsername(newCreator);
+
+                // 发送系统消息到房间通知房主变更
+                messageService.sendSystemMessage(
+                        MessageService.MessageTarget.ROOM,
+                        room.getId(),
+                        "用户 " + username + " 离开了房间，" + newCreator + " 成为新房主"
+                );
+
                 logger.info("房间 {} 的房主权限已从 {} 转移给 {}", room.getId(), username, newCreator);
+            } else {
+                // 普通用户离开时发送通知
+                messageService.sendSystemMessage(
+                        MessageService.MessageTarget.ROOM,
+                        room.getId(),
+                        "用户 " + username + " 离开了房间"
+                );
             }
 
             roomRepository.save(room);
@@ -232,6 +300,13 @@ public class RoomService {
         // 广播游戏开始消息
         broadcastRoomUpdate(room, "STARTED", username);
 
+        // 发送系统消息到房间通知游戏开始
+        messageService.sendSystemMessage(
+                MessageService.MessageTarget.ROOM,
+                roomId,
+                "游戏已开始，祝大家游戏愉快！"
+        );
+
         logger.info("房间 {} 的游戏已开始", roomId);
         return true;
     }
@@ -267,6 +342,13 @@ public class RoomService {
 
         // 广播游戏结束消息
         broadcastRoomUpdate(room, "ENDED", username);
+
+        // 发送系统消息到房间通知游戏结束
+        messageService.sendSystemMessage(
+                MessageService.MessageTarget.ROOM,
+                roomId,
+                "游戏已结束，房间回到等待状态"
+        );
 
         logger.info("房间 {} 的游戏已结束", roomId);
         return true;
@@ -343,31 +425,6 @@ public class RoomService {
         }
     }
 
-    /**
-     * 发送房间消息
-     */
-    public void sendRoomMessage(Long roomId, String senderUsername, String message) {
-        Room room = roomRepository.findById(roomId).orElse(null);
-        if (room != null && room.containsPlayer(senderUsername)) {
-            // 构建消息
-            Map<String, Object> chatMessage = new HashMap<>();
-            chatMessage.put("roomId", roomId);
-            chatMessage.put("sender", senderUsername);
-            chatMessage.put("message", message);
-            chatMessage.put("timestamp", System.currentTimeMillis());
-
-            // 保存消息历史
-            messageService.addRoomMessage(roomId, senderUsername, message);
-
-            // 发送到房间特定频道
-            String destination = "/topic/room." + roomId + ".messages";
-            webSocketService.broadcastMessage(destination, chatMessage);
-
-            logger.debug("用户 {} 在房间 {} 发送消息: {}", senderUsername, roomId, message);
-        }
-    }
-
-    @Scheduled(cron = "0 0 * * * *") // 每小时整点执行
     public void cleanupEmptyRooms() {
         List<Room> emptyRooms = roomRepository.findEmptyRooms();
 
@@ -382,17 +439,14 @@ public class RoomService {
                 // 清理房间相关的消息记录
                 messageService.clearRoomMessageHistory(room.getId());
 
-                // 清理N2N网络配置
-                // Todo: 删除n2n网络
+                // 清理网络配置
+                // Todo: 删除网络
 
                 // 删除房间
                 deleteRoom(room.getId());
             }
 
             logger.info("空房间清理完成，共清理 {} 个房间", emptyRooms.size());
-
-            // 发送系统通知
-            webSocketService.sendSystemNotification("系统已自动清理了 " + emptyRooms.size() + " 个空房间");
         }
     }
 
@@ -448,6 +502,13 @@ public class RoomService {
                 offlineUsersRemoved++;
                 logger.debug("从房间 {} 中移除离线用户: {}", room.getId(), offlineUsername);
 
+                // 发送系统消息到房间通知用户被移除
+                messageService.sendSystemMessage(
+                        MessageService.MessageTarget.ROOM,
+                        room.getId(),
+                        "用户 " + offlineUsername + " 因长时间不活动已被系统移出房间"
+                );
+
                 // 广播用户离开消息
                 broadcastRoomUpdate(room, "LEFT", offlineUsername);
             }
@@ -479,8 +540,14 @@ public class RoomService {
         if (offlineUsersRemoved > 0 || emptyRoomsRemoved > 0) {
             String notification = String.format("系统自动清理: 移除了 %d 个离线用户, 删除了 %d 个空房间",
                     offlineUsersRemoved, emptyRoomsRemoved);
-            webSocketService.sendSystemNotification(notification);
             logger.info(notification);
+
+            // 向大厅发送系统清理通知
+            messageService.sendSystemMessage(
+                    MessageService.MessageTarget.LOBBY,
+                    null,
+                    notification
+            );
         }
 
         // 返回可加入的房间
@@ -493,6 +560,9 @@ public class RoomService {
         Room room = roomRepository.findById(roomId).orElse(null);
 
         if (room != null) {
+            // 获取房间名称用于后续消息
+            String roomName = room.getName();
+
             // 再次检查房间是否为空
             if (room.isEmpty()) {
                 // 删除前先清理相关资源
@@ -503,7 +573,14 @@ public class RoomService {
                     // 执行删除
                     roomRepository.deleteById(roomId);
 
-                    logger.info("成功删除空房间: ID={}, 名称={}", roomId, room.getName());
+                    // 发送系统消息到大厅通知房间已删除
+                    messageService.sendSystemMessage(
+                            MessageService.MessageTarget.LOBBY,
+                            null,
+                            "房间 \"" + roomName + "\" 已被系统清理"
+                    );
+
+                    logger.info("成功删除空房间: ID={}, 名称={}", roomId, roomName);
                 } catch (Exception e) {
                     logger.error("删除房间 {} 时发生错误: {}", roomId, e.getMessage());
                     throw e;

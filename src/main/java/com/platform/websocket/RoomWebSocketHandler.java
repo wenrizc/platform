@@ -1,6 +1,7 @@
 package com.platform.websocket;
 
 import com.platform.entity.Room;
+import com.platform.service.MessageService;
 import com.platform.service.RoomService;
 import com.platform.service.UserService;
 import com.platform.service.WebSocketService;
@@ -21,13 +22,13 @@ public class RoomWebSocketHandler {
     private static final Logger logger = LoggerFactory.getLogger(RoomWebSocketHandler.class);
 
     private final RoomService roomService;
-    private final UserService userService;
+    private final MessageService messageService;
     private final WebSocketService webSocketService;
 
     @Autowired
-    public RoomWebSocketHandler(RoomService roomService, UserService userService, WebSocketService webSocketService) {
+    public RoomWebSocketHandler(RoomService roomService, MessageService messageService, WebSocketService webSocketService) {
         this.roomService = roomService;
-        this.userService = userService;
+        this.messageService = messageService;
         this.webSocketService = webSocketService;
     }
 
@@ -131,34 +132,5 @@ public class RoomWebSocketHandler {
 
         Long roomId = ((Number) payload.get("roomId")).longValue();
         roomService.endGame(username, roomId);
-    }
-
-    /**
-     * 房间内玩家发送消息
-     */
-    @MessageMapping("/room.message")
-    public void handleRoomMessage(@Payload Map<String, Object> payload,
-                                  SimpMessageHeaderAccessor headerAccessor) {
-        String username = (String) headerAccessor.getSessionAttributes().get("username");
-        if (username == null) {
-            logger.warn("未授权的房间消息发送");
-            return;
-        }
-
-        Long roomId = ((Number) payload.get("roomId")).longValue();
-        String message = (String) payload.get("message");
-
-        if (message == null || message.trim().isEmpty()) {
-            logger.warn("用户 {} 尝试发送空消息", username);
-            return;
-        }
-
-        // 验证用户在房间中
-        Room room = roomService.getUserRoom(username);
-        if (room != null && room.getId().equals(roomId)) {
-            roomService.sendRoomMessage(roomId, username, message);
-        } else {
-            logger.warn("用户 {} 试图发送消息到不属于他的房间 {}", username, roomId);
-        }
     }
 }

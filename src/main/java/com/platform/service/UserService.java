@@ -23,11 +23,14 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final WebSocketService webSocketService;
+    private final VirtualNetworkFactory virtualNetworkFactory;
 
     @Autowired
-    public UserService(UserRepository userRepository, WebSocketService webSocketService) {
+    public UserService(UserRepository userRepository, WebSocketService webSocketService,
+                       VirtualNetworkFactory virtualNetworkFactory) {
         this.userRepository = userRepository;
         this.webSocketService = webSocketService;
+        this.virtualNetworkFactory = virtualNetworkFactory;
     }
 
     /**
@@ -132,30 +135,6 @@ public class UserService {
     }
 
     /**
-     * 为用户分配虚拟IP (房间创建或加入时)
-     */
-    public String assignVirtualIp(String username) {
-        User user = userRepository.findByUsername(username);
-        if (user != null && user.getVirtualIp() == null) {
-            // TODO 需要从n2n服务获取IP
-
-        }
-        return user != null ? user.getVirtualIp() : null;
-    }
-
-    /**
-     * 更新用户的虚拟IP
-     */
-    public User updateUserVirtualIp(String username, String virtualIp) {
-        User user = userRepository.findByUsername(username);
-        if (user != null) {
-            user.setVirtualIp(virtualIp);
-            return userRepository.save(user);
-        }
-        return null;
-    }
-
-    /**
      * 判断用户是否活跃
      */
     public boolean isUserActive(User user) {
@@ -164,12 +143,7 @@ public class UserService {
                 Duration.between(user.getLastActiveTime(), Instant.now())
                         .compareTo(getUserTimeout()) <= 0;
     }
-
-    /**
-     * 定时清理不活跃用户
-     * 每半年执行一次 (cron表达式：秒 分 时 日 月 周)
-     */
-    @Scheduled(cron = "0 0 0 1 */6 *")  // 每半年的1号0点执行
+    // 每月1号0点执行
     public void cleanupInactiveUsers() {
         Instant cutoffTime = Instant.now().minus(Duration.ofDays(180)); // 半年不活跃的用户
 
@@ -199,5 +173,12 @@ public class UserService {
 
     public User findById(Long userId) {
         return userRepository.findById(userId).orElse(null);
+    }
+
+    /**
+     * 更新用户信息
+     */
+    public User updateUser(User user) {
+        return userRepository.save(user);
     }
 }
