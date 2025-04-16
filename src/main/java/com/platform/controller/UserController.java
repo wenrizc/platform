@@ -136,31 +136,23 @@ public class UserController {
         return ResponseEntity.ok(userService.getAllActiveUsers());
     }
 
-    /**
-     * 获取当前用户的网络信息，包括虚拟IP
-     */
     @GetMapping("/network-info")
     public ResponseEntity<?> getUserNetworkInfo(HttpSession session) {
-        // 从会话中获取用户名
-        String username = (String) session.getAttribute("username");
-        if (username == null) {
+        // 获取会话ID并通过ID查找用户
+        String sessionId = session.getId();
+
+        // 通过会话ID查找用户
+        User user = userService.findBySessionId(sessionId);
+        if (user == null) {
             Map<String, Object> response = new HashMap<>();
             response.put("success", false);
             response.put("message", "用户未登录");
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(response);
         }
 
-        // 获取用户信息
-        User user = userService.findByUsername(username);
-        if (user == null) {
-            Map<String, Object> response = new HashMap<>();
-            response.put("success", false);
-            response.put("message", "用户不存在");
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
-        }
-
         // 构建网络信息响应
         Map<String, Object> networkInfo = new HashMap<>();
+        String username = user.getUsername(); // 现在从用户对象获取用户名
         networkInfo.put("username", username);
         networkInfo.put("virtualIp", user.getVirtualIp());
         networkInfo.put("inRoom", user.getRoomId() > 0);

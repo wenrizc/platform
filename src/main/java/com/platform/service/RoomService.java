@@ -1,18 +1,23 @@
 package com.platform.service;
 
-import com.platform.entity.Room;
-import com.platform.entity.User;
-import com.platform.repository.RoomRepository;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.*;
-import java.util.stream.Collectors;
+import com.platform.entity.Room;
+import com.platform.entity.User;
+import com.platform.repository.RoomRepository;
 
 @Service
 public class RoomService {
@@ -475,6 +480,7 @@ public class RoomService {
         return leaveRoom(user.getUsername());
     }
 
+    @Transactional
     public List<Room> getJoinableRoomsWithCleanup() {
         int offlineUsersRemoved = 0;
         int emptyRoomsRemoved = 0;
