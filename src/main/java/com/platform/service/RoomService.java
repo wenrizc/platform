@@ -1,13 +1,8 @@
 package com.platform.service;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-
+import com.platform.entity.Room;
+import com.platform.entity.User;
+import com.platform.repository.RoomRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,9 +10,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.platform.entity.Room;
-import com.platform.entity.User;
-import com.platform.repository.RoomRepository;
+import java.util.*;
 
 @Service
 public class RoomService {

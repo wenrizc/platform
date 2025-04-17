@@ -3,7 +3,6 @@ package com.platform.websocket;
 import com.platform.entity.Room;
 import com.platform.service.MessageService;
 import com.platform.service.RoomService;
-import com.platform.service.UserService;
 import com.platform.service.WebSocketService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
