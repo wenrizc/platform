@@ -68,7 +68,7 @@ public class Room {
         this.gameName = gameName;
         this.maxPlayers = maxPlayers;
         this.creatorUsername = creatorUsername;
-        this.players.add(creatorUsername); // 创建者自动加入房间
+        this.players.add(creatorUsername);
         this.creationTime = Instant.now();
         this.status = RoomStatus.WAITING;
     }
@@ -154,9 +154,7 @@ public class Room {
         this.networkType = networkType;
     }
 
-    public Set<String> getPlayers() {
-        return players;
-    }
+    public Set<String> getPlayers() { return players;}
 
     public void addPlayer(String username) {
         this.players.add(username);

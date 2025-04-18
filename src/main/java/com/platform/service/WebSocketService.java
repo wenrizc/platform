@@ -10,6 +10,13 @@ import org.springframework.stereotype.Service;
 import java.util.HashMap;
 import java.util.Map;
 
+/**
+ * WebSocket服务
+ * <p>
+ * 负责处理WebSocket消息的发送，包括用户间直接消息、广播消息、
+ * 状态更新通知、系统通知和心跳响应等
+ * </p>
+ */
 @Service
 public class WebSocketService {
 
@@ -23,6 +30,10 @@ public class WebSocketService {
 
     /**
      * 发送消息给特定用户
+     *
+     * @param username 目标用户名
+     * @param destination 目标路径
+     * @param payload 消息内容
      */
     public void sendMessageToUser(String username, String destination, Object payload) {
         messagingTemplate.convertAndSendToUser(username, destination, payload);
@@ -30,7 +41,10 @@ public class WebSocketService {
     }
 
     /**
-     * 广播消息给所有用户
+     * 广播消息
+     *
+     * @param destination 目标路径
+     * @param payload 消息内容
      */
     public void broadcastMessage(String destination, Object payload) {
         try {
@@ -43,38 +57,57 @@ public class WebSocketService {
 
     /**
      * 发送用户状态更新通知
+     * 广播用户上线/下线状态
+     *
+     * @param user 发生状态变化的用户
+     * @param online 是否在线
      */
     public void sendUserStatusUpdate(User user, boolean online) {
-        Map<String, Object> status = new HashMap<>();
+        Map<String, Object> status = createBaseMessage();
         status.put("username", user.getUsername());
         status.put("online", online);
-        status.put("timestamp", System.currentTimeMillis());
 
         broadcastMessage("/topic/users.status", status);
     }
 
     /**
      * 发送心跳响应
+     * 回应客户端的心跳请求，维持连接活跃
+     *
+     * @param username 目标用户名
      */
     public void sendHeartbeatResponse(String username) {
-        Map<String, Object> response = new HashMap<>();
+        Map<String, Object> response = createBaseMessage();
         response.put("type", "heartbeat");
-        response.put("timestamp", System.currentTimeMillis());
 
         sendMessageToUser(username, "/queue/heartbeat", response);
     }
 
     /**
      * 发送系统通知消息
+     * 广播系统级别通知给所有用户
+     *
+     * @param message 通知内容
      */
     public void sendSystemNotification(String message) {
-        Map<String, Object> notification = new HashMap<>();
+        Map<String, Object> notification = createBaseMessage();
         notification.put("sender", "系统");
         notification.put("message", message);
-        notification.put("timestamp", System.currentTimeMillis());
         notification.put("type", "SYSTEM_NOTIFICATION");
 
         broadcastMessage("/topic/system.notifications", notification);
         logger.debug("发送系统通知: {}", message);
+    }
+
+    /**
+     * 创建基础消息对象
+     * 所有消息共享的基础字段
+     *
+     * @return 包含时间戳的基础消息Map
+     */
+    private Map<String, Object> createBaseMessage() {
+        Map<String, Object> message = new HashMap<>();
+        message.put("timestamp", System.currentTimeMillis());
+        return message;
     }
 }

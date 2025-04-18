@@ -9,12 +9,15 @@ import java.util.Base64;
 
 /**
  * 虚拟网络服务抽象基类
- * 实现了一些通用功能
  */
 public abstract class AbstractVirtualNetworkService implements VirtualNetworkService {
 
     protected final Logger logger = LoggerFactory.getLogger(this.getClass());
 
+    /**
+     * 生成网络标识
+     * @return 随机生成的网络标识
+     */
     @Override
     public String generateNetworkSecret() {
         // 生成一个随机的16字节密钥并使用Base64编码

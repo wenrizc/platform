@@ -12,18 +12,9 @@ import java.util.Optional;
 @Repository
 public interface RoomRepository extends JpaRepository<Room, Long> {
 
-    // 查找指定用户创建的房间
-    List<Room> findByCreatorUsername(String creatorUsername);
-
     // 查找包含指定用户的房间
     @Query("SELECT r FROM Room r JOIN r.players p WHERE p = :username")
     List<Room> findByPlayerUsername(@Param("username") String username);
-
-    // 查找处于等待状态的房间
-    List<Room> findByStatus(Room.RoomStatus status);
-
-    // 查找指定游戏名称的房间
-    List<Room> findByGameName(String gameName);
 
     // 查找指定房间名称的房间
     Optional<Room> findByName(String name);

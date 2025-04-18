@@ -1,10 +1,12 @@
 package com.platform.controller;
 
 import com.platform.entity.Room;
+import com.platform.entity.User;
 import com.platform.service.RoomService;
 import com.platform.service.UserService;
 import jakarta.servlet.http.HttpSession;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -12,6 +14,10 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 房间控制器
+ * 处理游戏房间的创建、加入、退出及游戏状态管理
+ */
 @RestController
 @RequestMapping("/api/rooms")
 public class RoomController {
@@ -26,11 +32,49 @@ public class RoomController {
     }
 
     /**
+     * 获取可加入的房间列表
+     */
+    @GetMapping
+    public ResponseEntity<List<Room>> getJoinableRooms() {
+        return ResponseEntity.ok(roomService.getJoinableRooms());
+    }
+
+    /**
+     * 获取用户当前所在房间
+     */
+    @GetMapping("/my-room")
+    public ResponseEntity<?> getUserRoom(HttpSession session) {
+        String username = getUsernameFromSession(session);
+        if (username == null) {
+            return ResponseEntity.badRequest().body(createErrorResponse("用户未登录"));
+        }
+
+        Room room = roomService.getUserRoom(username);
+        if (room == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(createErrorResponse("用户不在任何房间中"));
+        }
+
+        return ResponseEntity.ok(room);
+    }
+
+    /**
+     * 获取指定房间详情
+     */
+    @GetMapping("/{roomId}")
+    public ResponseEntity<?> getRoomInfo(@PathVariable Long roomId) {
+        Room room = roomService.getRoomInfo(roomId);
+        if (room == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(createErrorResponse("房间不存在"));
+        }
+
+        return ResponseEntity.ok(room);
+    }
+
+    /**
      * 创建新房间
      */
     @PostMapping
-    public ResponseEntity<?> createRoom(@RequestBody Map<String, Object> request,
-                                        HttpSession session) {
+    public ResponseEntity<?> createRoom(@RequestBody Map<String, Object> request, HttpSession session) {
         String username = getUsernameFromSession(session);
         if (username == null) {
             return ResponseEntity.badRequest().body(createErrorResponse("用户未登录"));
@@ -44,7 +88,6 @@ public class RoomController {
             return ResponseEntity.badRequest().body(createErrorResponse("缺少必要参数"));
         }
 
-        // 检查房间名是否已存在
         if (roomService.isRoomNameExists(roomName)) {
             return ResponseEntity.badRequest().body(createErrorResponse("房间名已存在，请使用其他名称"));
         }
@@ -61,11 +104,14 @@ public class RoomController {
      * 加入房间
      */
     @PostMapping("/{roomId}/join")
-    public ResponseEntity<?> joinRoom(@PathVariable Long roomId,
-                                      HttpSession session) {
+    public ResponseEntity<?> joinRoom(@PathVariable Long roomId, HttpSession session) {
         String username = getUsernameFromSession(session);
         if (username == null) {
             return ResponseEntity.badRequest().body(createErrorResponse("用户未登录"));
+        }
+
+        if (roomId == null || roomId <= 0) {
+            return ResponseEntity.badRequest().body(createErrorResponse("无效的房间ID"));
         }
 
         boolean joined = roomService.joinRoom(username, roomId);
@@ -101,8 +147,7 @@ public class RoomController {
      * 开始游戏
      */
     @PostMapping("/{roomId}/start")
-    public ResponseEntity<?> startGame(@PathVariable Long roomId,
-                                       HttpSession session) {
+    public ResponseEntity<?> startGame(@PathVariable Long roomId, HttpSession session) {
         String username = getUsernameFromSession(session);
         if (username == null) {
             return ResponseEntity.badRequest().body(createErrorResponse("用户未登录"));
@@ -121,8 +166,7 @@ public class RoomController {
      * 结束游戏
      */
     @PostMapping("/{roomId}/end")
-    public ResponseEntity<?> endGame(@PathVariable Long roomId,
-                                     HttpSession session) {
+    public ResponseEntity<?> endGame(@PathVariable Long roomId, HttpSession session) {
         String username = getUsernameFromSession(session);
         if (username == null) {
             return ResponseEntity.badRequest().body(createErrorResponse("用户未登录"));
@@ -138,59 +182,12 @@ public class RoomController {
     }
 
     /**
-     * 获取可加入的房间列表
-     */
-    @GetMapping
-    public ResponseEntity<List<Room>> getJoinableRooms() {
-        return ResponseEntity.ok(roomService.getJoinableRoomsWithCleanup());
-    }
-
-    /**
-     * 按游戏类型筛选可加入的房间
-     */
-    @GetMapping("/by-game/{gameType}")
-    public ResponseEntity<List<Room>> getJoinableRoomsByGameType(@PathVariable String gameType) {
-        return ResponseEntity.ok(roomService.getJoinableRoomsByGameName(gameType));
-    }
-
-    /**
-     * 获取用户当前所在房间
-     */
-    @GetMapping("/my-room")
-    public ResponseEntity<?> getUserRoom(HttpSession session) {
-        String username = getUsernameFromSession(session);
-        if (username == null) {
-            return ResponseEntity.badRequest().body(createErrorResponse("用户未登录"));
-        }
-
-        Room room = roomService.getUserRoom(username);
-        if (room == null) {
-            return ResponseEntity.status(404).body(createErrorResponse("用户不在任何房间中"));
-        }
-
-        return ResponseEntity.ok(room);
-    }
-
-    /**
-     * 获取指定房间详情
-     */
-    @GetMapping("/{roomId}")
-    public ResponseEntity<?> getRoomInfo(@PathVariable Long roomId) {
-        Room room = roomService.getRoomInfo(roomId);
-        if (room == null) {
-            return ResponseEntity.status(404).body(createErrorResponse("房间不存在"));
-        }
-
-        return ResponseEntity.ok(room);
-    }
-
-    /**
      * 从session中获取用户名
      */
     private String getUsernameFromSession(HttpSession session) {
         if (session == null) return null;
 
-        com.platform.entity.User user = userService.findBySessionId(session.getId());
+        User user = userService.findBySessionId(session.getId());
         return user != null && user.isActive() ? user.getUsername() : null;
     }
 

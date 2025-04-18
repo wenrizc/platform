@@ -1,6 +1,8 @@
 package com.platform.service.impl.n2n;
 
+import com.platform.config.N2nConfig;
 import com.platform.config.VirtualNetworkProperties;
+import com.platform.entity.NetworkInfo;
 import com.platform.service.impl.AbstractVirtualNetworkService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,57 +18,41 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * N2N虚拟网络服务实现
- * <p>
- * 通过命令行调用N2N工具创建和管理虚拟网络
- * </p>
+ * 通过N2N技术创建和管理虚拟网络连接，支持P2P通信
  */
 @Service("N2N")
 public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
 
     private static final Logger logger = LoggerFactory.getLogger(N2NVirtualNetworkService.class);
 
-    private final VirtualNetworkProperties networkProperties;
-
     private final Map<String, NetworkInfo> networksMap = new ConcurrentHashMap<>();
     private final Map<String, String> ipAssignments = new ConcurrentHashMap<>();
 
-    @Autowired
-    public N2NVirtualNetworkService(VirtualNetworkProperties networkProperties) {
-        this.networkProperties = networkProperties;
-    }
-
     @Override
     public String createNetwork() {
-        // 获取N2N配置
-        VirtualNetworkProperties.N2nConfig config = networkProperties.getN2n();
-        String supernode = config.getSupernode();
+        String supernode = N2nConfig.getSupernode();
 
         // 检查超级节点连接
-        boolean supernodeAvailable = checkSupernodeConnection(supernode);
-        if (!supernodeAvailable) {
+        if (!checkSupernodeConnection(supernode)) {
             logger.warn("N2N超级节点连接检查失败，但仍将继续创建网络");
         }
 
-        // 生成唯一网络ID
+        // 使用基类方法生成唯一网络ID
         String networkId = generateRandomId();
 
-        // 创建网络信息对象
+        // 创建并保存网络信息
         NetworkInfo networkInfo = new NetworkInfo();
         networkInfo.setNetworkId(networkId);
         networkInfo.setCreationTime(Instant.now());
         networkInfo.setLastActiveTime(Instant.now());
-        networkInfo.setSubnet(networkProperties.getN2n().getSubnet());
-        networkInfo.setSupernode(networkProperties.getN2n().getSupernode());
+        networkInfo.setSubnet(N2nConfig.getSubnet());
+        networkInfo.setSupernode(supernode);
 
-        // 存储网络信息
         networksMap.put(networkId, networkInfo);
 
         logger.info("创建N2N虚拟网络: {}, 子网: {}", networkId, networkInfo.getSubnet());
@@ -104,15 +90,33 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
             return ipAssignments.get(key);
         }
 
-        // 基于用户名生成固定IP地址
-        String ip = generateIpFromUsername(username, networkInfo.getSubnet());
-        ipAssignments.put(key, ip);
+        // 使用同步块确保线程安全
+        synchronized (this) {
+            // 再次检查，防止在获取锁期间其他线程已分配IP
+            if (ipAssignments.containsKey(key)) {
+                return ipAssignments.get(key);
+            }
 
-        // 更新网络活动时间
-        networkInfo.setLastActiveTime(Instant.now());
+            // 生成初始IP
+            String ip = generateIpFromUsername(username, networkInfo.getSubnet());
 
-        logger.info("为用户 {} 在网络 {} 中分配IP: {}", username, networkId, ip);
-        return ip;
+            // 检查IP是否已被其他用户占用
+            Set<String> usedIps = new HashSet<>(ipAssignments.values());
+
+            // 如果初始IP已被占用，使用确定性算法尝试后续IP
+            if (usedIps.contains(ip)) {
+                ip = resolveIpConflict(ip, usedIps);
+            }
+
+            // 存储IP分配
+            ipAssignments.put(key, ip);
+
+            // 更新网络活动时间
+            networkInfo.setLastActiveTime(Instant.now());
+
+            logger.info("为用户 {} 在网络 {} 中分配IP: {}", username, networkId, ip);
+            return ip;
+        }
     }
 
     @Override
@@ -139,74 +143,24 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
 
         if (networkId == null) {
             // 返回所有网络的概览
-            List<Map<String, Object>> networks = new ArrayList<>();
-
-            for (Map.Entry<String, NetworkInfo> entry : networksMap.entrySet()) {
-                NetworkInfo info = entry.getValue();
-                Map<String, Object> networkData = new HashMap<>();
-                networkData.put("networkId", info.getNetworkId());
-                networkData.put("creationTime", info.getCreationTime());
-                networkData.put("lastActiveTime", info.getLastActiveTime());
-                networkData.put("subnet", info.getSubnet());
-                networkData.put("supernode", info.getSupernode());
-
-                // 计算活跃用户数
-                int activeUsers = (int) ipAssignments.keySet().stream()
-                        .filter(key -> key.startsWith(info.getNetworkId() + "_"))
-                        .count();
-                networkData.put("activeUsers", activeUsers);
-
-                networks.add(networkData);
-            }
-
-            result.put("status", "healthy");
-            result.put("networks", networks);
-            result.put("totalNetworks", networks.size());
-
+            return getAllNetworksInfo(result);
         } else {
             // 返回指定网络的详细信息
-            NetworkInfo info = networksMap.get(networkId);
-            if (info == null) {
-                result.put("status", "error");
-                result.put("message", "网络不存在: " + networkId);
-                return result;
-            }
-
-            result.put("status", "healthy");
-            result.put("networkId", info.getNetworkId());
-            result.put("creationTime", info.getCreationTime());
-            result.put("lastActiveTime", info.getLastActiveTime());
-            result.put("subnet", info.getSubnet());
-            result.put("supernode", info.getSupernode());
-
-            // 收集该网络的所有IP分配
-            Map<String, String> users = new HashMap<>();
-            ipAssignments.forEach((key, ip) -> {
-                if (key.startsWith(networkId + "_")) {
-                    String user = key.substring(networkId.length() + 1);
-                    users.put(user, ip);
-                }
-            });
-
-            result.put("users", users);
-            result.put("activeUsers", users.size());
+            return getSingleNetworkInfo(networkId, result);
         }
-
-        return result;
     }
 
     @Override
     public String getConnectionCommand(String networkName, String networkSecret) {
-        VirtualNetworkProperties.N2nConfig config = networkProperties.getN2n();
 
         // 构建edge命令行
         StringBuilder command = new StringBuilder();
         command.append("edge -c ").append(networkName);
         command.append(" -k ").append(networkSecret);
         command.append(" -a dhcp:0.0.0.0");  // 使用DHCP自动获取IP
-        command.append(" -l ").append(config.getSupernode());
+        command.append(" -l ").append(N2nConfig.getSupernode());
 
-        if (config.isAutoReconnect()) {
+        if (N2nConfig.isAutoReconnect()) {
             command.append(" -r");
         }
 
@@ -219,16 +173,89 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
     }
 
     /**
+     * 获取当前配置的N2N超级节点地址
+     * @return 超级节点地址，格式为host:port
+     */
+    public String getSuperNodeAddress() {
+        return N2nConfig.getSupernode();
+    }
+
+    /**
+     * 获取所有网络的概览信息
+     */
+    private Map<String, Object> getAllNetworksInfo(Map<String, Object> result) {
+        List<Map<String, Object>> networks = new ArrayList<>();
+
+        for (Map.Entry<String, NetworkInfo> entry : networksMap.entrySet()) {
+            NetworkInfo info = entry.getValue();
+            Map<String, Object> networkData = new HashMap<>();
+            networkData.put("networkId", info.getNetworkId());
+            networkData.put("creationTime", info.getCreationTime());
+            networkData.put("lastActiveTime", info.getLastActiveTime());
+            networkData.put("subnet", info.getSubnet());
+            networkData.put("supernode", info.getSupernode());
+
+            // 计算活跃用户数
+            int activeUsers = (int) ipAssignments.keySet().stream()
+                    .filter(key -> key.startsWith(info.getNetworkId() + "_"))
+                    .count();
+            networkData.put("activeUsers", activeUsers);
+
+            networks.add(networkData);
+        }
+
+        result.put("status", "healthy");
+        result.put("networks", networks);
+        result.put("totalNetworks", networks.size());
+        return result;
+    }
+
+    /**
+     * 获取单个网络的详细信息
+     */
+    private Map<String, Object> getSingleNetworkInfo(String networkId, Map<String, Object> result) {
+        NetworkInfo info = networksMap.get(networkId);
+        if (info == null) {
+            result.put("status", "error");
+            result.put("message", "网络不存在: " + networkId);
+            return result;
+        }
+
+        result.put("status", "healthy");
+        result.put("networkId", info.getNetworkId());
+        result.put("creationTime", info.getCreationTime());
+        result.put("lastActiveTime", info.getLastActiveTime());
+        result.put("subnet", info.getSubnet());
+        result.put("supernode", info.getSupernode());
+
+        // 收集该网络的所有IP分配
+        Map<String, String> users = new HashMap<>();
+        ipAssignments.forEach((key, ip) -> {
+            if (key.startsWith(networkId + "_")) {
+                String user = key.substring(networkId.length() + 1);
+                users.put(user, ip);
+            }
+        });
+
+        result.put("users", users);
+        result.put("activeUsers", users.size());
+        return result;
+    }
+
+    /**
      * 基于用户名和子网生成固定IP地址
-     *
-     * @param username 用户名
-     * @param subnet 子网CIDR表示法
-     * @return 生成的IP地址
+     * 确保相同用户名在相同子网中总是生成相同的IP
      */
     private String generateIpFromUsername(String username, String subnet) {
         try {
+            String saltedUsername = username;
+
             // 解析子网
             String[] parts = subnet.split("/");
+            if (parts.length != 2) {
+                throw new IllegalArgumentException("无效的子网格式: " + subnet);
+            }
+
             String networkAddress = parts[0];
             int prefixLength = Integer.parseInt(parts[1]);
 
@@ -242,7 +269,7 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
 
             // 使用MD5哈希用户名生成唯一数字
             MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(username.getBytes(StandardCharsets.UTF_8));
+            byte[] digest = md.digest(saltedUsername.getBytes(StandardCharsets.UTF_8));
 
             // 取哈希的前4字节作为整数
             int hash = ((digest[0] & 0xFF) << 24) |
@@ -263,7 +290,7 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
             // 转换回IP地址字符串
             return intToIpString(ipInt);
 
-        } catch (UnknownHostException | NoSuchAlgorithmException e) {
+        } catch (UnknownHostException | NoSuchAlgorithmException | IllegalArgumentException e) {
             logger.error("生成IP地址时出错", e);
             // 回退方案，生成10.0.0.x格式的地址
             int fallbackIP = Math.abs(username.hashCode() % 250) + 1;
@@ -272,32 +299,70 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
     }
 
     /**
-     * 检查端口是否开放
-     *
-     * @param host 主机名或IP地址
-     * @param port 端口号
-     * @return 端口是否开放
+     * 确定性解决IP冲突
+     * 当初始IP冲突时，按顺序递增IP直到找到未被使用的IP
      */
-    private boolean isPortOpen(String host, int port) {
-        boolean isPortOpen = false;
-        int timeout = ("localhost".equals(host) || "127.0.0.1".equals(host)) ? 1000 : 3000;
+    private String resolveIpConflict(String initialIp, Set<String> usedIps) {
+        try {
+            // 解析IP地址
+            String[] parts = initialIp.split("\\.");
+            if (parts.length != 4) {
+                throw new IllegalArgumentException("无效的IP格式: " + initialIp);
+            }
 
-        try (Socket socket = new Socket()) {
-            socket.connect(new InetSocketAddress(host, port), timeout);
-            isPortOpen = true;
-            logger.debug("成功连接到端口 {}:{}", host, port);
-        } catch (IOException e) {
-            logger.warn("端口未开放: {}:{}", host, port);
+            int[] octets = new int[4];
+            for (int i = 0; i < 4; i++) {
+                octets[i] = Integer.parseInt(parts[i]);
+            }
+
+            // 限制尝试次数，避免无限循环
+            int maxAttempts = 254;
+            String candidateIp = initialIp;
+
+            for (int attempt = 0; attempt < maxAttempts; attempt++) {
+                // 递增最后一个字节
+                octets[3] = (octets[3] + 1) % 256;
+
+                // 如果最后一个字节溢出了，递增倒数第二个字节
+                if (octets[3] == 0) {
+                    octets[2] = (octets[2] + 1) % 256;
+
+                    // 如果倒数第二个字节溢出了，递增倒数第三个字节
+                    if (octets[2] == 0) {
+                        octets[1] = (octets[1] + 1) % 256;
+
+                        // 如果倒数第三个字节溢出了，递增第一个字节
+                        if (octets[1] == 0) {
+                            octets[0] = (octets[0] + 1) % 256;
+                        }
+                    }
+                }
+
+                // 避免保留地址（0.0.0.0和255.255.255.255）
+                if ((octets[0] == 0 && octets[1] == 0 && octets[2] == 0 && octets[3] == 0) ||
+                        (octets[0] == 255 && octets[1] == 255 && octets[2] == 255 && octets[3] == 255)) {
+                    continue;
+                }
+
+                candidateIp = octets[0] + "." + octets[1] + "." + octets[2] + "." + octets[3];
+
+                // 检查生成的IP是否未被使用
+                if (!usedIps.contains(candidateIp)) {
+                    logger.debug("IP冲突已解决，原始IP: {}，分配IP: {}", initialIp, candidateIp);
+                    return candidateIp;
+                }
+            }
+
+            logger.warn("无法解决IP冲突，原始IP: {}, 已尝试次数: {}", initialIp, maxAttempts);
+            return initialIp; // 返回原始IP，作为最后的回退选项
+        } catch (Exception e) {
+            logger.error("解决IP冲突时发生错误", e);
+            return initialIp;
         }
-
-        return isPortOpen;
     }
 
     /**
      * 检查N2N超级节点是否可连接
-     *
-     * @param supernode 超级节点地址 (host:port格式)
-     * @return 超级节点是否可连接
      */
     private boolean checkSupernodeConnection(String supernode) {
         try {
@@ -323,6 +388,24 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
     }
 
     /**
+     * 检查端口是否开放
+     */
+    private boolean isPortOpen(String host, int port) {
+        boolean isPortOpen = false;
+        int timeout = ("localhost".equals(host) || "127.0.0.1".equals(host)) ? 1000 : 3000;
+
+        try (Socket socket = new Socket()) {
+            socket.connect(new InetSocketAddress(host, port), timeout);
+            isPortOpen = true;
+            logger.debug("成功连接到端口 {}:{}", host, port);
+        } catch (IOException e) {
+            logger.warn("端口未开放: {}:{}", host, port);
+        }
+
+        return isPortOpen;
+    }
+
+    /**
      * 将字节数组转换为整数
      */
     private int byteArrayToInt(byte[] bytes) {
@@ -340,56 +423,5 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
                 ((ip >> 16) & 0xFF) + "." +
                 ((ip >> 8) & 0xFF) + "." +
                 (ip & 0xFF);
-    }
-
-    /**
-     * 内部网络信息存储类
-     */
-    private static class NetworkInfo {
-        private String networkId;
-        private Instant creationTime;
-        private Instant lastActiveTime;
-        private String subnet;
-        private String supernode;
-
-        public String getNetworkId() {
-            return networkId;
-        }
-
-        public void setNetworkId(String networkId) {
-            this.networkId = networkId;
-        }
-
-        public Instant getCreationTime() {
-            return creationTime;
-        }
-
-        public void setCreationTime(Instant creationTime) {
-            this.creationTime = creationTime;
-        }
-
-        public Instant getLastActiveTime() {
-            return lastActiveTime;
-        }
-
-        public void setLastActiveTime(Instant lastActiveTime) {
-            this.lastActiveTime = lastActiveTime;
-        }
-
-        public String getSubnet() {
-            return subnet;
-        }
-
-        public void setSubnet(String subnet) {
-            this.subnet = subnet;
-        }
-
-        public String getSupernode() {
-            return supernode;
-        }
-
-        public void setSupernode(String supernode) {
-            this.supernode = supernode;
-        }
     }
 }
