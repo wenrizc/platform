@@ -1,7 +1,6 @@
 package com.platform.service.impl.n2n;
 
 import com.platform.config.N2nConfig;
-import com.platform.config.VirtualNetworkProperties;
 import com.platform.entity.NetworkInfo;
 import com.platform.service.impl.AbstractVirtualNetworkService;
 import org.slf4j.Logger;
@@ -33,9 +32,16 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
     private final Map<String, NetworkInfo> networksMap = new ConcurrentHashMap<>();
     private final Map<String, String> ipAssignments = new ConcurrentHashMap<>();
 
+    private final N2nConfig n2nConfig;
+
+    @Autowired
+    public N2NVirtualNetworkService(N2nConfig n2nConfig) {
+        this.n2nConfig = n2nConfig;
+    }
+
     @Override
     public String createNetwork() {
-        String supernode = N2nConfig.getSupernode();
+        String supernode = n2nConfig.getSupernode();
 
         // 检查超级节点连接
         if (!checkSupernodeConnection(supernode)) {
@@ -50,7 +56,7 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
         networkInfo.setNetworkId(networkId);
         networkInfo.setCreationTime(Instant.now());
         networkInfo.setLastActiveTime(Instant.now());
-        networkInfo.setSubnet(N2nConfig.getSubnet());
+        networkInfo.setSubnet(n2nConfig.getSubnet());
         networkInfo.setSupernode(supernode);
 
         networksMap.put(networkId, networkInfo);
@@ -158,9 +164,9 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
         command.append("edge -c ").append(networkName);
         command.append(" -k ").append(networkSecret);
         command.append(" -a dhcp:0.0.0.0");  // 使用DHCP自动获取IP
-        command.append(" -l ").append(N2nConfig.getSupernode());
+        command.append(" -l ").append(n2nConfig.getSupernode());
 
-        if (N2nConfig.isAutoReconnect()) {
+        if (n2nConfig.isAutoReconnect()) {
             command.append(" -r");
         }
 
@@ -177,7 +183,7 @@ public class N2NVirtualNetworkService extends AbstractVirtualNetworkService {
      * @return 超级节点地址，格式为host:port
      */
     public String getSuperNodeAddress() {
-        return N2nConfig.getSupernode();
+        return n2nConfig.getSupernode();
     }
 
     /**

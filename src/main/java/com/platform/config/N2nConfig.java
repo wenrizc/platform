@@ -1,13 +1,36 @@
 package com.platform.config;
 
-public class N2nConfig {
-    private static final String supernode = "supernodes.n2n.example.com:7654";
-    private static final String subnet = "10.0.0.0/24";
-    private static final int maxUsersPerNetwork = 100;
-    private static final boolean autoReconnect = true;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
-    public static String getSupernode() { return supernode; }
-    public static String getSubnet() { return subnet; }
-    public static int getMaxUsersPerNetwork() { return maxUsersPerNetwork; }
-    public static boolean isAutoReconnect() { return autoReconnect; }
+@Component
+public class N2nConfig {
+
+    @Value("${virtual.network.n2n.supernode}")
+    private String supernode;
+
+    @Value("${virtual.network.n2n.subnet}")
+    private String subnet;
+
+    @Value("${virtual.network.n2n.max-users-per-network}")
+    private int maxUsersPerNetwork;
+
+    @Value("${virtual.network.n2n.auto-reconnect}")
+    private boolean autoReconnect;
+
+    public String getSupernode() {
+        return supernode;
+    }
+
+    public String getSubnet() {
+        return subnet;
+    }
+
+    public int getMaxUsersPerNetwork() {
+        return maxUsersPerNetwork;
+    }
+
+    public boolean isAutoReconnect() {
+        return autoReconnect;
+    }
 }
